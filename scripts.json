@@ -1,0 +1,11 @@
+{
+  "$schema": "https://deno.land/x/denon@2.5.0/schema.json",
+  "allow": ["all"],
+  "unstable": true,
+  "scripts": {
+    "start": {
+      "cmd": "deno run test.ts",
+      "desc": "run my app.ts file"
+    }
+  }
+}
