@@ -1,11 +1,11 @@
 import { opine } from "https://deno.land/x/opine@2.2.0/mod.ts";
-import { cookieSession } from "./mod.ts";
+import cookieSession from "./mod.ts";
 
 const app = opine();
 cookieSession(app, {
   sameSite: "Strict",
   secure: true,
-  maxAge: 1,
+  maxAge: 10 * 60, // 10 mins
   httpOnly: true,
 });
 
@@ -17,6 +17,11 @@ app.get("/", (req, res) => {
   }
 
   session.insert("count", ++count).save();
+
+  if (count == 10) {
+    session.clear();
+  }
+
   res.send(`Count: ${count}`);
 });
 

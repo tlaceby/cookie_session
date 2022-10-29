@@ -1,8 +1,7 @@
 // deno-lint-ignore-file
-import { Opine } from "https://deno.land/x/opine@2.2.0/mod.ts";
+import { Opine, OpineResponse } from "https://deno.land/x/opine@2.2.0/mod.ts";
 import { getCookies } from "https://deno.land/std@0.161.0/http/cookie.ts";
 
-// @ts-ignore
 declare module "https://deno.land/x/opine@2.2.0/mod.ts" {
   interface OpineRequest {
     session: RouteSession;
@@ -24,13 +23,13 @@ export interface CookieSesssionOptions {
   sameSite?: SameSitePolicy;
 }
 
-export function cookieSession(
+function cookieSession(
   opine: Opine,
   config: CookieSesssionOptions = {},
 ) {
   let { maxAge, httpOnly, secure, sameSite } = config;
   httpOnly ??= true;
-  maxAge ??= 10; // 60 seconds
+  maxAge ??= 60 * 60 * 12; // 12 Hours
   secure ??= false;
   sameSite ??= "Lax";
 
@@ -38,7 +37,7 @@ export function cookieSession(
     let currentSession: any;
     let sid: string;
     const cookies = getCookies(req.headers);
-    if (cookies["sid"]) {
+    if ((sid = cookies["sid"]) && storage.has(sid)) {
       sid = cookies["sid"];
     } else {
       sid = crypto.randomUUID();
@@ -55,16 +54,19 @@ export function cookieSession(
       });
     }
 
-    req.session = new RouteSession(sid);
+    req.session = new RouteSession(sid, res);
     next();
   });
 }
 
+export default cookieSession;
+
 class RouteSession {
   private sid: string;
   private data: Map<string, any>;
-
-  constructor(sid: string) {
+  private response: OpineResponse;
+  constructor(sid: string, res: OpineResponse) {
+    this.response = res;
     this.data = new Map();
     const cached = storage.get(sid);
     for (const key of Object.keys(cached)) {
@@ -124,6 +126,7 @@ class RouteSession {
   public clear() {
     this.data.clear();
     storage.delete(this.sid);
+    this.response.clearCookie("sid");
     return this;
   }
 
