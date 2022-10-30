@@ -1,6 +1,7 @@
 // deno-lint-ignore-file
 import { Opine, OpineResponse } from "https://deno.land/x/opine@2.2.0/mod.ts";
 import { getCookies } from "https://deno.land/std@0.161.0/http/cookie.ts";
+import MemorySessionStore, { StoreAdapter } from "./stores/session_store.ts";
 
 declare module "https://deno.land/x/opine@2.2.0/mod.ts" {
   interface OpineRequest {
@@ -8,7 +9,7 @@ declare module "https://deno.land/x/opine@2.2.0/mod.ts" {
   }
 }
 
-const storage = new Map<string, any>();
+let storage: StoreAdapter;
 
 export type SameSitePolicy = "None" | "Lax" | "Strict";
 
@@ -21,23 +22,26 @@ export interface CookieSesssionOptions {
   secure?: boolean;
   // Defaults to "None"
   sameSite?: SameSitePolicy;
+  // Defaults to in memory storage
+  store?: StoreAdapter;
 }
 
 function cookieSession(
   opine: Opine,
   config: CookieSesssionOptions = {},
 ) {
-  let { maxAge, httpOnly, secure, sameSite } = config;
-  httpOnly ??= true;
-  maxAge ??= 60 * 60 * 12; // 12 Hours
-  secure ??= false;
-  sameSite ??= "Lax";
+  let { store } = config;
+  const httpOnly = config.httpOnly || false;
+  const maxAge = config.maxAge || 60 * 60 * 12;
+  const secure = config.secure || false;
+  const sameSite = config.sameSite || "Lax";
+  storage = store || new MemorySessionStore();
 
-  opine.use((req, res, next) => {
+  opine.use(async (req, res, next) => {
     let currentSession: any;
     let sid: string;
     const cookies = getCookies(req.headers);
-    if ((sid = cookies["sid"]) && storage.has(sid)) {
+    if ((sid = cookies["sid"]) && await storage.has(sid)) {
       sid = cookies["sid"];
     } else {
       sid = crypto.randomUUID();
@@ -54,93 +58,92 @@ function cookieSession(
       });
     }
 
-    req.session = new RouteSession(sid, res);
+    req.session = await routeSession(sid, res);
     next();
   });
 }
 
 export default cookieSession;
 
-class RouteSession {
-  private sid: string;
-  private data: Map<string, any>;
-  private response: OpineResponse;
-  constructor(sid: string, res: OpineResponse) {
-    this.response = res;
-    this.data = new Map();
-    const cached = storage.get(sid);
-    for (const key of Object.keys(cached)) {
-      this.data.set(key, cached[key]);
-    }
-    this.sid = sid;
+interface RouteSession {
+  get: (key: string) => any;
+  has: (key: string) => boolean;
+  remove: (key: string) => void;
+  keys: () => string[];
+  insert: (key: string, value: any) => void;
+  all: () => any;
+  save: () => Promise<void>;
+  clear: () => Promise<void>;
+  sessionID: () => string;
+}
+
+async function routeSession(sid: string, res: OpineResponse) {
+  const response = res;
+  const data = new Map();
+
+  const cached = await storage.get(sid);
+  for (const key of Object.keys(cached)) {
+    data.set(key, cached[key]);
   }
 
-  public get(key: string) {
-    return this.data.get(key);
-  }
+  const get = (key: string) => {
+    return data.get(key);
+  };
 
-  public has(key: string) {
-    return this.data.has(key);
-  }
+  const has = (key: string) => {
+    return data.has(key);
+  };
 
-  /**
-   * Renoves a single entry from the session
-   */
-  public remove(key: string) {
-    this.data.delete(key);
-    return this;
-  }
+  const remove = (key: string) => {
+    data.delete(key);
+  };
 
-  /**
-   * Returns a list of keys on this session.
-   */
-  public keys(): string[] {
+  const keys = (): string[] => {
     let keys: string[] = [];
-    for (const [key, _] of Object.entries(this.data)) {
+    for (const [key, _] of Object.entries(data)) {
       keys.push(key);
     }
 
     return keys;
-  }
+  };
 
   /**
    * Inserts or edits the current session. For changes to be reflected in
    * subsequent requests call .save() after making any modifications.
    */
-  public insert(key: string, value: any) {
-    this.data.set(key, value);
-    return this;
-  }
-
-  /**
-   * Save the values of the current session folr use later.
-   */
-  public save() {
-    const data = this.all();
-    storage.set(this.sid, data);
-    return this;
-  }
-
-  /**
-   * Removes all data from the session. This also calls save() in the process */
-  public clear() {
-    this.data.clear();
-    storage.delete(this.sid);
-    this.response.clearCookie("sid");
-    return this;
-  }
+  const insert = (key: string, value: any) => {
+    data.set(key, value);
+  };
 
   /**
    * Gets all data from current session.
    */
-  public all() {
-    return Object.fromEntries(this.data.entries());
-  }
+  const all = () => {
+    return Object.fromEntries(data.entries());
+  };
+
+  /**
+   * Save the values of the current session folr use later.
+   */
+  const save = async () => {
+    const data = all();
+    await storage.set(sid, data);
+  };
+
+  /**
+   * Removes all data from the session. This also calls save() in the process */
+  const clear = async () => {
+    data.clear();
+    await storage.remove(sid);
+    response.clearCookie("sid");
+  };
 
   /**
    * Retrieves the sid value from the session token
    */
-  public sessionID(): string {
-    return this.sid;
-  }
+  const sessionID = () => {
+    return sid;
+  };
+
+  return { get, has, remove, keys, insert, all, save, clear, sessionID };
 }
