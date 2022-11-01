@@ -1,7 +1,8 @@
 // deno-lint-ignore-file
 import { Opine, OpineResponse } from "https://deno.land/x/opine@2.2.0/mod.ts";
 import { getCookies } from "https://deno.land/std@0.161.0/http/cookie.ts";
-import MemorySessionStore, { StoreAdapter } from "./stores/session_store.ts";
+import memorySessionStore, { StoreAdapter } from "./stores/session_store.ts";
+import mongoSessionStore from "./stores/mongoStore.ts";
 
 declare module "https://deno.land/x/opine@2.2.0/mod.ts" {
   interface OpineRequest {
@@ -9,10 +10,12 @@ declare module "https://deno.land/x/opine@2.2.0/mod.ts" {
   }
 }
 
-let storage: StoreAdapter;
+export const MemorySessionStore = memorySessionStore;
+export const MongoSessionStore = mongoSessionStore;
+export * from "./stores/mongoStore.ts";
+export * from "./stores/session_store.ts";
 
 export type SameSitePolicy = "None" | "Lax" | "Strict";
-
 export interface CookieSesssionOptions {
   // Defaults to: 60 * 60 * 12 -> Half Day
   maxAge?: number;
@@ -25,6 +28,8 @@ export interface CookieSesssionOptions {
   // Defaults to in memory storage
   store?: StoreAdapter;
 }
+
+let storage: StoreAdapter;
 
 function cookieSession(
   opine: Opine,
@@ -45,8 +50,8 @@ function cookieSession(
       sid = cookies["sid"];
     } else {
       sid = crypto.randomUUID();
-      currentSession = {};
-      storage.set(sid, currentSession);
+      currentSession = { sid };
+      await storage.set(sid, currentSession);
 
       res.cookie({
         secure,
@@ -80,12 +85,21 @@ interface RouteSession {
 async function routeSession(sid: string, res: OpineResponse) {
   const response = res;
   const data = new Map();
-
   const cached = await storage.get(sid);
+
   for (const key of Object.keys(cached)) {
-    data.set(key, cached[key]);
+    if (key !== "_id") {
+      data.set(key, cached[key]);
+    }
   }
 
+  // ---------------------------------
+  // -------- PUBLIC API -------------
+  // ---------------------------------
+
+  /**
+   * For the current session retrieve data.
+   */
   const get = (key: string) => {
     return data.get(key);
   };

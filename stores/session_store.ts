@@ -5,6 +5,7 @@ export interface StoreAdapter {
   set(session_id: string, data: any): Promise<void>;
   get(session_id: string): Promise<any>;
   remove(session_id: string): Promise<boolean>;
+  eraseAll(): Promise<void>;
 }
 
 export default class MemorySessionStore implements StoreAdapter {
@@ -24,5 +25,9 @@ export default class MemorySessionStore implements StoreAdapter {
 
   async remove(session_id: string) {
     return this.storage.delete(session_id);
+  }
+
+  async eraseAll(): Promise<void> {
+    this.storage.clear();
   }
 }

@@ -1,14 +1,11 @@
 import { opine } from "https://deno.land/x/opine@2.2.0/mod.ts";
-import cookieSession from "./mod.ts";
-import mongoSessionStore from "./stores/mongoStore.ts";
+import cookieSession, { MongoSessionStore } from "./mod.ts";
 
 const app = opine();
 cookieSession(app, {
-  sameSite: "Strict",
-  secure: true,
-  maxAge: 10 * 60, // 10 mins
+  maxAge: 15,
   httpOnly: true,
-  store: await mongoSessionStore("mongodb://127.0.0.1:27017"),
+  store: await MongoSessionStore("mongodb://127.0.0.1:27017"),
 });
 
 app.get("/", async (req, res) => {
